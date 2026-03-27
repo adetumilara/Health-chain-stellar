@@ -6,9 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, OptimisticLockVersionMismatchError, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
 
+import { OptimisticLockVersionMismatchError, Repository } from 'typeorm';
+
+import { PaginatedResponse, PaginationUtil } from '../common/pagination';
 import {
   OrderConfirmedEvent,
   OrderCancelledEvent,
@@ -21,19 +23,21 @@ import {
   OrderResolvedEvent,
 } from '../events';
 import { InventoryService } from '../inventory/inventory.service';
-import { PaginatedResponse, PaginationUtil } from '../common/pagination';
 
 import { OrderQueryParamsDto } from './dto/order-query-params.dto';
 import { OrdersResponseDto } from './dto/orders-response.dto';
 import { UpdateRequestStatusDto } from './dto/update-request-status.dto';
-import { OrderEntity } from './entities/order.entity';
 import { OrderEventEntity } from './entities/order-event.entity';
+import { OrderEntity } from './entities/order.entity';
 import { OrderEventType } from './enums/order-event-type.enum';
 import { OrderStatus } from './enums/order-status.enum';
 import { RequestStatusAction } from './enums/request-status-action.enum';
-import { OrderStateMachine } from './state-machine/order-state-machine';
 import { OrderEventStoreService } from './services/order-event-store.service';
+import { FeePolicyService } from '../fee-policy/fee-policy.service';
+import { FeePreviewDto } from '../fee-policy/dto/fee-policy.dto';
+import { FeeBreakdownDto } from '../fee-policy/dto/fee-policy.dto';
 import { RequestStatusService } from './services/request-status.service';
+import { OrderStateMachine } from './state-machine/order-state-machine';
 import { Order, BloodType } from './types/order.types';
 
 @Injectable()
@@ -50,8 +54,10 @@ export class OrdersService {
     private readonly eventStore: OrderEventStoreService,
     private readonly eventEmitter: EventEmitter2,
     private readonly inventoryService: InventoryService,
+    private readonly sorobanService: SorobanService,
     private readonly requestStatusService: RequestStatusService,
-  ) {}
+    private readonly feePolicyService: FeePolicyService,
+  ) { }
 
   // ─── Queries ─────────────────────────────────────────────────────────────
 
@@ -82,21 +88,21 @@ export class OrdersService {
 
     // Start with all orders for the hospital
     let filteredOrders = this.orders.filter(
-      (order) => order.hospital.id === hospitalId
+      (order) => order.hospital.id === hospitalId,
     );
 
     // Apply date range filter
     if (startDate) {
       const start = new Date(startDate);
       filteredOrders = filteredOrders.filter(
-        (order) => new Date(order.placedAt) >= start
+        (order) => new Date(order.placedAt) >= start,
       );
     }
 
     if (endDate) {
       const end = new Date(endDate);
       filteredOrders = filteredOrders.filter(
-        (order) => new Date(order.placedAt) <= end
+        (order) => new Date(order.placedAt) <= end,
       );
     }
 
@@ -104,7 +110,7 @@ export class OrdersService {
     if (bloodTypes) {
       const bloodTypeArray = bloodTypes.split(',') as BloodType[];
       filteredOrders = filteredOrders.filter((order) =>
-        bloodTypeArray.includes(order.bloodType)
+        bloodTypeArray.includes(order.bloodType),
       );
     }
 
@@ -112,7 +118,7 @@ export class OrdersService {
     if (statuses) {
       const statusArray = statuses.split(',') as OrderStatus[];
       filteredOrders = filteredOrders.filter((order) =>
-        statusArray.includes(order.status)
+        statusArray.includes(order.status),
       );
     }
 
@@ -120,7 +126,7 @@ export class OrdersService {
     if (bloodBank) {
       const searchTerm = bloodBank.toLowerCase();
       filteredOrders = filteredOrders.filter((order) =>
-        order.bloodBank.name.toLowerCase().includes(searchTerm)
+        order.bloodBank.name.toLowerCase().includes(searchTerm),
       );
     }
 
@@ -205,16 +211,30 @@ export class OrdersService {
 
   // ─── Commands ─────────────────────────────────────────────────────────────
 
-  async create(createOrderDto: any, actorId?: string) {
+  async create(createOrderDto: CreateOrderDto, actorId?: string) {
     if (!createOrderDto.bloodBankId) {
-      throw new BadRequestException('bloodBankId is required to place an order.');
+      throw new BadRequestException(
+        'bloodBankId is required to place an order.',
+      );
     }
 
+    const saved = await this.createOrderEntity(createOrderDto, actorId);
+
+    // Compute and save fees for confirmed orders (on create, status PENDING, compute on transition)
+    if (saved.status === OrderStatus.CONFIRMED || saved.status === OrderStatus.DISPATCHED) {
+      await this.computeFees(saved);
+    }
+
+    this.logger.log(`Order created: ${saved.id}`);
+    return { message: 'Order created successfully', data: saved };
+  }
+
+  private async createOrderEntity(createOrderDto: CreateOrderDto, actorId?: string): Promise<OrderEntity> {
     try {
       await this.inventoryService.reserveStockOrThrow(
-        createOrderDto.bloodBankId,
+        createOrderDto.bloodBankId!,
         createOrderDto.bloodType,
-        Number(createOrderDto.quantity),
+        createOrderDto.quantity,
       );
     } catch (error) {
       if (error instanceof ConflictException) {
@@ -225,44 +245,56 @@ export class OrdersService {
       );
     }
 
-    const saved = await this.dataSource.transaction(async (manager) => {
-      const order = manager.create(OrderEntity, {
-        hospitalId: createOrderDto.hospitalId,
-        bloodBankId: createOrderDto.bloodBankId,
-        bloodType: createOrderDto.bloodType,
-        quantity: createOrderDto.quantity,
-        deliveryAddress: createOrderDto.deliveryAddress,
-        status: OrderStatus.PENDING,
-        riderId: null,
-      });
-
-      const savedOrder = await manager.save(OrderEntity, order);
-
-      // Persist the creation event atomically with the order row.
-      // If either write fails the whole transaction rolls back.
-      await this.eventStore.persistEventWithManager(manager, {
-        orderId: savedOrder.id,
-        eventType: OrderEventType.ORDER_CREATED,
-        payload: {
-          hospitalId: savedOrder.hospitalId,
-          bloodBankId: savedOrder.bloodBankId,
-          bloodType: savedOrder.bloodType,
-          quantity: savedOrder.quantity,
-          deliveryAddress: savedOrder.deliveryAddress,
-        },
-        actorId,
-      });
-
-      return savedOrder;
+    const order = this.orderRepo.create({
+      hospitalId: createOrderDto.hospitalId,
+      bloodBankId: createOrderDto.bloodBankId,
+      bloodType: createOrderDto.bloodType,
+      quantity: createOrderDto.quantity,
+      deliveryAddress: createOrderDto.deliveryAddress,
+      status: OrderStatus.PENDING,
+      riderId: null,
     });
 
-    this.logger.log(`Order created: ${saved.id}`);
-    return { message: 'Order created successfully', data: saved };
+    const saved = await this.orderRepo.save(order);
+
+    await this.eventStore.persistEvent({
+      orderId: saved.id,
+      eventType: OrderEventType.ORDER_CREATED,
+      payload: {
+        hospitalId: saved.hospitalId,
+        bloodBankId: saved.bloodBankId,
+        bloodType: saved.bloodType,
+        quantity: saved.quantity,
+        deliveryAddress: saved.deliveryAddress,
+      },
+      actorId,
+    });
+
+    return saved;
+  }
+
+  async computeFees(order: OrderEntity): Promise<void> {
+    // Extract inputs from order (TODO: integrate maps for distance, config for geography)
+    const previewDto: FeePreviewDto = {
+      geographyCode: 'LAG', // Default, make configurable
+      urgencyTier: 'STANDARD' as any, // From order status/service level
+      distanceKm: 10, // From maps or DTO
+      serviceLevel: 'BASIC' as any,
+      quantity: order.quantity,
+    };
+
+    const breakdown = await this.feePolicyService.previewFees(previewDto);
+    order.feeBreakdown = breakdown as any;
+    order.appliedPolicyId = breakdown.appliedPolicyId;
+    await this.orderRepo.save(order);
   }
 
   async update(id: string, updateOrderDto: any) {
     const order = await this.findOrderOrFail(id);
-    if (updateOrderDto.version !== undefined && updateOrderDto.version !== order.version) {
+    if (
+      updateOrderDto.version !== undefined &&
+      updateOrderDto.version !== order.version
+    ) {
       throw new ConflictException(
         `Order '${id}' was modified by another request. Fetch the latest version and retry.`,
       );
@@ -299,6 +331,17 @@ export class OrdersService {
         : statusUpdate;
 
     const order = await this.findOrderOrFail(id);
+    await this.requestStatusService.applyStatusUpdate(
+      order,
+      dto,
+      actorId,
+      actorRole,
+    );
+
+    // Compute fees for confirmed/dispatched
+    if (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.DISPATCHED || order.status === OrderStatus.IN_TRANSIT) {
+      await this.computeFees(order);
+    }
 
     try {
       const updated = await this.dataSource.transaction(async (manager) => {
@@ -357,7 +400,10 @@ export class OrdersService {
       new OrderRiderAssignedEvent(orderId, riderId),
     );
 
-    return { message: 'Rider assigned successfully', data: { orderId, riderId } };
+    return {
+      message: 'Rider assigned successfully',
+      data: { orderId, riderId },
+    };
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
