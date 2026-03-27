@@ -22,6 +22,8 @@ import {
   OrderResolvedEvent,
 } from '../events';
 import { InventoryService } from '../inventory/inventory.service';
+import { SorobanService } from '../blockchain/services/soroban.service';
+import { generateIdempotencyKey } from '../common/utils/idempotency-key.util';
 
 import { OrderQueryParamsDto } from './dto/order-query-params.dto';
 import { OrdersResponseDto } from './dto/orders-response.dto';
@@ -61,6 +63,7 @@ export class OrdersService {
     private readonly eventStore: OrderEventStoreService,
     private readonly ordersGateway: OrdersGateway,
     private readonly inventoryService: InventoryService,
+    private readonly sorobanService: SorobanService,
   ) {}
 
   // ─── Queries ─────────────────────────────────────────────────────────────
@@ -273,6 +276,40 @@ export class OrdersService {
       },
       actorId,
     });
+
+    // Submit to blockchain with deterministic idempotency key
+    const idempotencyKey = generateIdempotencyKey('order-create', saved.id, {
+      hospitalId: saved.hospitalId,
+      bloodBankId: saved.bloodBankId,
+      bloodType: saved.bloodType,
+      quantity: saved.quantity,
+    });
+
+    try {
+      await this.sorobanService.submitTransaction({
+        contractMethod: 'record_order',
+        args: {
+          orderId: saved.id,
+          hospitalId: saved.hospitalId,
+          bloodBankId: saved.bloodBankId,
+          bloodType: saved.bloodType,
+          quantity: saved.quantity,
+        },
+        idempotencyKey,
+        metadata: {
+          operation: 'order-create',
+          entityId: saved.id,
+        },
+      });
+      this.logger.log(
+        `Order ${saved.id} submitted to blockchain with key: ${idempotencyKey}`,
+      );
+    } catch (error) {
+      // Log but don't fail the order creation - blockchain submission is async
+      this.logger.warn(
+        `Failed to submit order ${saved.id} to blockchain: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
 
     this.logger.log(`Order created: ${saved.id}`);
     return { message: 'Order created successfully', data: saved };
