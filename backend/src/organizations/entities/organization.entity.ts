@@ -6,6 +6,7 @@ import {
   Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
 } from 'typeorm';
 
 import { OrganizationType } from '../enums/organization-type.enum';
@@ -17,6 +18,7 @@ import { VerificationStatus } from '../enums/verification-status.enum';
 @Index('IDX_ORGANIZATIONS_VERIFICATION_STATUS', ['verificationStatus'])
 @Index('IDX_ORGANIZATIONS_LOCATION', ['latitude', 'longitude'])
 @Index('IDX_ORGANIZATIONS_CITY_COUNTRY', ['city', 'country'])
+@Index('IDX_ORGANIZATIONS_DELETED_AT', ['deletedAt'])
 export class OrganizationEntity extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

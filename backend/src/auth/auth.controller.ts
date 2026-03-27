@@ -34,6 +34,7 @@ import {
   UnlockAccountDto,
 } from './dto/auth.dto';
 import { Permission } from './enums/permission.enum';
+import { RateLimit } from '../common/decorators/rate-limit.decorator';
 
 /** Stricter than global default (100/min) to reduce brute-force and abuse on auth. */
 @Throttle({ default: { limit: 20, ttl: 60_000 } })
