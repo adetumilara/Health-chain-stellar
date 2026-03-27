@@ -153,7 +153,9 @@ describe('AuthService', () => {
         lockedUntil: null,
       } as UserEntity;
       (userRepository.findOne as jest.Mock).mockResolvedValue(user);
-      (userRepository.save as jest.Mock).mockImplementation(async (entity) => entity);
+      (userRepository.save as jest.Mock).mockImplementation(
+        async (entity) => entity,
+      );
 
       await expect(
         serviceCustom.login({
@@ -193,7 +195,9 @@ describe('AuthService', () => {
         lockedUntil: new Date(Date.now() - 60_000),
       } as UserEntity;
       (userRepository.findOne as jest.Mock).mockResolvedValue(user);
-      (userRepository.save as jest.Mock).mockImplementation(async (entity) => entity);
+      (userRepository.save as jest.Mock).mockImplementation(
+        async (entity) => entity,
+      );
       mockJwtService.sign.mockReturnValueOnce('access-token');
       mockJwtService.sign.mockReturnValueOnce('refresh-token');
 
