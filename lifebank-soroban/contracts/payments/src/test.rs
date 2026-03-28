@@ -421,59 +421,43 @@ fn test_update_status_returns_not_found_for_missing_payment() {
     assert!(result.is_err());
 }
 
-// ── create_escrow ──────────────────────────────────────────────────────────────
+// ── donation pledges ───────────────────────────────────────────────────────────
 
 #[test]
-fn test_create_escrow_exact_balance_succeeds() {
+fn test_create_pledge_stores_metadata() {
     let (env, cid) = setup();
     let client = PaymentContractClient::new(&env, &cid);
+    let donor = Address::generate(&env);
+    let pool = soroban_sdk::String::from_str(&env, "hospital-pool-42");
+    let cause = soroban_sdk::String::from_str(&env, "maternal_health");
+    let region = soroban_sdk::String::from_str(&env, "NG-Lagos");
 
-    let admin = Address::generate(&env);
-    let hospital = Address::generate(&env);
-    let payee = Address::generate(&env);
-    let amount: i128 = 1_000;
+    let id = client.create_pledge(
+        &donor,
+        &500i128,
+        &2_592_000u64,
+        &pool,
+        &cause,
+        &region,
+        &true,
+    );
 
-    let token_id = deploy_token_with_balance(&env, &admin, &hospital, amount);
-
-    let id = client.create_escrow(&1u64, &hospital, &payee, &amount, &token_id);
-    let payment = client.get_payment(&id);
-
-    assert_eq!(payment.status, PaymentStatus::Locked);
-    assert_eq!(payment.amount, amount);
-    assert_eq!(payment.payer, hospital);
+    let p = client.get_pledge(&id);
+    assert_eq!(p.donor, donor);
+    assert_eq!(p.amount_per_period, 500);
+    assert_eq!(p.interval_secs, 2_592_000);
+    assert!(p.emergency_pool);
+    assert!(p.active);
 }
 
 #[test]
-fn test_create_escrow_one_unit_short_returns_insufficient_funds() {
+fn test_create_pledge_rejects_zero_interval() {
     let (env, cid) = setup();
     let client = PaymentContractClient::new(&env, &cid);
-
-    let admin = Address::generate(&env);
-    let hospital = Address::generate(&env);
-    let payee = Address::generate(&env);
-    let balance: i128 = 999;
-    let required: i128 = 1_000;
-
-    let token_id = deploy_token_with_balance(&env, &admin, &hospital, balance);
-
-    let result = client.try_create_escrow(&1u64, &hospital, &payee, &required, &token_id);
-    assert_eq!(result, Err(Ok(Error::InsufficientEscrowFunds)));
-}
-
-#[test]
-fn test_create_escrow_no_storage_entry_on_failure() {
-    let (env, cid) = setup();
-    let client = PaymentContractClient::new(&env, &cid);
-
-    let admin = Address::generate(&env);
-    let hospital = Address::generate(&env);
-    let payee = Address::generate(&env);
-
-    // Hospital has zero balance
-    let token_id = deploy_token_with_balance(&env, &admin, &hospital, 0);
-
-    let _ = client.try_create_escrow(&1u64, &hospital, &payee, &500i128, &token_id);
-
-    // No payment should have been stored
-    assert_eq!(client.get_payment_count(), 0);
+    let donor = Address::generate(&env);
+    let pool = soroban_sdk::String::from_str(&env, "pool");
+    let cause = soroban_sdk::String::from_str(&env, "c");
+    let region = soroban_sdk::String::from_str(&env, "r");
+    let r = client.try_create_pledge(&donor, &100i128, &0u64, &pool, &cause, &region, &false);
+    assert!(r.is_err());
 }
