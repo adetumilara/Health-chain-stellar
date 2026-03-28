@@ -82,6 +82,18 @@ export class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
+  JWT_SECRET_KID: string = 'key-1';
+
+  @IsOptional()
+  @IsString()
+  JWT_PREVIOUS_SECRET: string = '';
+
+  @IsOptional()
+  @IsString()
+  JWT_PREVIOUS_SECRET_KID: string = 'key-0';
+
+  @IsOptional()
+  @IsString()
   JWT_EXPIRES_IN: string = '1h';
 
   @IsString()
@@ -193,9 +205,28 @@ export class EnvironmentVariables {
   THROTTLE_LIMIT: number = 100;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  THROTTLE_AUTH_TTL: number = 60;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  THROTTLE_AUTH_LIMIT: number = 10;
+
+  @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   THROTTLER_USE_REDIS: boolean = true;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  PASSWORD_HISTORY_LENGTH: number = 3;
 
   // ─── Inventory Forecasting ────────────────────────────────────────────────
 
@@ -232,4 +263,37 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   RETENTION_ACTIVITY_LOG_DAYS: number = 90;
+
+  // ─── Email Verification ───────────────────────────────────────────────────
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  REQUIRE_EMAIL_VERIFICATION: boolean = false;
+
+  // ─── Concurrent Session Limits ────────────────────────────────────────────
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MAX_CONCURRENT_SESSIONS: number = 5;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MAX_CONCURRENT_SESSIONS_DONOR: number = 3;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MAX_CONCURRENT_SESSIONS_HOSPITAL: number = 5;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MAX_CONCURRENT_SESSIONS_ADMIN: number = 2;
 }
