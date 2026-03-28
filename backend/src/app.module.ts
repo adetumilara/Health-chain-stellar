@@ -44,6 +44,7 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
 import { CorrelationIdService } from './common/middleware/correlation-id.service';
 import { DatabaseSyncGuard } from './config/database-sync.guard';
 import { TrackingModule } from './tracking/tracking.module';
+import { TransparencyModule } from './transparency/transparency.module';
 
 import type Redis from 'ioredis';
 
@@ -124,6 +125,7 @@ import type Redis from 'ioredis';
     EventsModule,
     RetentionModule,
     TrackingModule,
+    TransparencyModule,
   ],
     FeePolicyModule,
   ]

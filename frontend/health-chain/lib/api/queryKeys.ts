@@ -31,4 +31,8 @@ export const queryKeys = {
   dashboard: {
     stats: ["dashboard", "stats"] as const,
   },
+
+  transparency: {
+    metrics: ["transparency", "metrics"] as const,
+  },
 } as const;
