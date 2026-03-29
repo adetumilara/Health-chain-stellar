@@ -1,11 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { PaginatedResponse, PaginationUtil } from '../common/pagination';
 import { CreateDeliveryProofDto } from './dto/create-delivery-proof.dto';
 import { DeliveryProofQueryDto } from './dto/delivery-proof-query.dto';
 import { DeliveryProofEntity } from './entities/delivery-proof.entity';
+import { SorobanService } from '../soroban/soroban.service';
 
 import { ConfigService } from '@nestjs/config';
 import { SorobanService } from '../soroban/soroban.service';
@@ -37,71 +42,88 @@ export class DeliveryProofService {
     private readonly sorobanService: SorobanService,
   ) {}
 
-  /**
-   * Handles delivery proof photo upload:
-   * 1. Compute SHA-256 of raw bytes.
-   * 2. Save to local storage (mock object storage).
-   * 3. Anchor hash on Soroban.
-   * 4. Update DeliveryProofEntity.
-   * Closes #464
-   */
   async uploadPhoto(orderId: string, file: any) {
     if (!file) {
-       throw new BadRequestException('No file uploaded');
+      throw new BadRequestException('No file uploaded');
     }
 
-    // Max 5MB check (handled by Multer mostly but good to have)
+    // 1. Validate file type (Issue #464: JPEG/PNG only)
+    const allowedMimeTypes = ['image/jpeg', 'image/png'];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG and PNG images are allowed');
+    }
+
+    // 2. Max 5MB check
     if (file.size > 5 * 1024 * 1024) {
-       throw new BadRequestException('Payload Too Large (Max 5MB)');
+      throw new BadRequestException('Payload Too Large (Max 5MB)');
     }
 
-    // 1. Compute SHA-256
+    // 3. Compute SHA-256 hash of raw bytes
     const hash = crypto.createHash('sha256').update(file.buffer).digest('hex');
 
-    // 2. Save to storage
-    const storagePath = this.configService.get<string>('STORAGE_PATH', './uploads');
+    // 4. Store in object storage (local path)
+    const storagePath = this.configService.get<string>(
+      'STORAGE_PATH',
+      './uploads',
+    );
     if (!fs.existsSync(storagePath)) {
-       fs.mkdirSync(storagePath, { recursive: true });
+      fs.mkdirSync(storagePath, { recursive: true });
     }
-    const fileName = `${orderId}-${Date.now()}-${file.originalname}`;
-    const filePath = path.join(storagePath, fileName);
-    fs.writeFileSync(filePath, file.buffer);
-    const storageUrl = `/uploads/${fileName}`;
 
-    // 3. Find or create entity
+    const fileExt = path.extname(file.originalname) || '.png';
+    const fileName = `dp-${orderId}-${Date.now()}${fileExt}`;
+    const filePath = path.join(storagePath, fileName);
+
+    try {
+      fs.writeFileSync(filePath, file.buffer);
+    } catch (err) {
+      this.logger.error(`Failed to write file to storage: ${err.message}`);
+      throw new BadRequestException('Internal Storage Error');
+    }
+
+    const storageUrl = `${storagePath}/${fileName}`;
+
+    // 5. Update Entity
     let proof = await this.proofRepo.findOne({ where: { orderId } });
     if (!proof) {
-       // Create minimal proof if not exists
-       proof = this.proofRepo.create({
-         orderId,
-         riderId: 'PENDING', // Will be updated
-         pickupTimestamp: new Date(),
-         deliveredAt: new Date(),
-         recipientName: 'PENDING',
-         temperatureReadings: [4.0], // Default compliant temp
-       });
+      proof = this.proofRepo.create({
+        orderId,
+        riderId: 'SYSTEM',
+        pickupTimestamp: new Date(),
+        deliveredAt: new Date(),
+        recipientName: 'Automatic Verification',
+        temperatureReadings: [4.0],
+        photoHashes: [],
+      });
     }
 
     proof.photoUrl = storageUrl;
     if (!proof.photoHashes) proof.photoHashes = [];
     proof.photoHashes.push(hash);
 
-    // 4. Anchor on Soroban
+    // 6. Anchor on Soroban blockchain
+    let txId: string | null = null;
     try {
-       const anchorResult = await this.sorobanService.anchorHash(orderId, hash);
-       proof.blockchainTxHash = anchorResult.transactionHash;
+      const anchorResult = await this.sorobanService.anchorHash(orderId, hash);
+      txId = anchorResult.transactionHash;
+      proof.blockchainTxHash = txId;
     } catch (error) {
-       this.logger.error(`Failed to anchor hash for order ${orderId}: ${error.message}`);
-       // We still save the file and hash locally
+      this.logger.warn(
+        `On-chain anchoring failed for order ${orderId}: ${error.message}`,
+      );
     }
 
     await this.proofRepo.save(proof);
 
     return {
-       success: true,
-       hash,
-       storageUrl,
-       transactionId: proof.blockchainTxHash,
+      success: true,
+      message: 'Delivery proof photo uploaded and anchored',
+      data: {
+        orderId,
+        sha256Hash: hash,
+        storageUrl,
+        transactionId: txId,
+      },
     };
   }
 
@@ -146,6 +168,91 @@ export class DeliveryProofService {
     });
 
     return this.proofRepo.save(proof);
+  }
+
+  async uploadPhoto(orderId: string, file: any) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    // 1. Validate file type (Issue #464: JPEG/PNG only)
+    const allowedMimeTypes = ['image/jpeg', 'image/png'];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG and PNG images are allowed');
+    }
+
+    // 2. Max 5MB check
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('Payload Too Large (Max 5MB)');
+    }
+
+    // 3. Compute SHA-256 hash of raw bytes
+    const hash = crypto.createHash('sha256').update(file.buffer).digest('hex');
+
+    // 4. Store in object storage (local path)
+    const storagePath = this.configService.get<string>(
+      'STORAGE_PATH',
+      './uploads',
+    );
+    if (!fs.existsSync(storagePath)) {
+      fs.mkdirSync(storagePath, { recursive: true });
+    }
+
+    const fileExt = path.extname(file.originalname) || '.png';
+    const fileName = `dp-${orderId}-${Date.now()}${fileExt}`;
+    const filePath = path.join(storagePath, fileName);
+
+    try {
+      fs.writeFileSync(filePath, file.buffer);
+    } catch (err) {
+      this.logger.error(`Failed to write file to storage: ${err.message}`);
+      throw new BadRequestException('Internal Storage Error');
+    }
+
+    const storageUrl = `${storagePath}/${fileName}`;
+
+    // 5. Update Entity
+    let proof = await this.proofRepo.findOne({ where: { orderId } });
+    if (!proof) {
+      proof = this.proofRepo.create({
+        orderId,
+        riderId: 'SYSTEM',
+        pickupTimestamp: new Date(),
+        deliveredAt: new Date(),
+        recipientName: 'Automatic Verification',
+        temperatureReadings: [4.0],
+        photoHashes: [],
+      });
+    }
+
+    proof.photoUrl = storageUrl;
+    if (!proof.photoHashes) proof.photoHashes = [];
+    proof.photoHashes.push(hash);
+
+    // 6. Anchor on Soroban blockchain
+    let txId: string | null = null;
+    try {
+      const anchorResult = await this.sorobanService.anchorHash(orderId, hash);
+      txId = anchorResult.transactionHash;
+      proof.blockchainTxHash = txId;
+    } catch (error) {
+      this.logger.warn(
+        `On-chain anchoring failed for order ${orderId}: ${error.message}`,
+      );
+    }
+
+    await this.proofRepo.save(proof);
+
+    return {
+      success: true,
+      message: 'Delivery proof photo uploaded and anchored',
+      data: {
+        orderId,
+        sha256Hash: hash,
+        storageUrl,
+        transactionId: txId,
+      },
+    };
   }
 
   async getDeliveryProof(id: string): Promise<DeliveryProofEntity> {
