@@ -23,6 +23,8 @@ import { QuarantineCase } from './entities/quarantine-case.entity';
 import { DispositionController } from './controllers/disposition.controller';
 import { QuarantineController } from './controllers/quarantine.controller';
 import { DispositionService } from './services/disposition.service';
+import { TransferRecord } from './entities/transfer-record.entity';
+
 
 @Module({
   imports: [
@@ -36,7 +38,9 @@ import { DispositionService } from './services/disposition.service';
       OrderEntity,
       UnitDispositionRecord,
       QuarantineCase,
+      TransferRecord,
     ]),
+
     SorobanModule,
     NotificationsModule,
     DonorEligibilityModule,
