@@ -70,4 +70,13 @@ export enum Permission {
   ADMIN_ACCESS = 'admin:access',
   MANAGE_ROLES = 'manage:roles',
   READ_ANALYTICS = 'read:analytics',
+
+  // ── Fine-grained workflow scopes (#374) ───────────────────────────────
+  INVENTORY_WRITE = 'inventory:write',
+  DISPATCH_OVERRIDE = 'dispatch:override',
+  REQUEST_APPROVE = 'request:approve',
+  DISPUTE_RESOLVE = 'dispute:resolve',
+  VERIFICATION_ADMIN = 'verification:admin',
+  SETTLEMENT_RELEASE = 'settlement:release',
+  EXPORT_DISPUTES = 'export:disputes',
 }

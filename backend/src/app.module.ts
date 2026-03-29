@@ -36,6 +36,7 @@ import { UsersModule } from './users/users.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { TransparencyModule } from './transparency/transparency.module';
 import { PolicyCenterModule } from './policy-center/policy-center.module';
+import { ReconciliationModule } from './reconciliation/reconciliation.module';
 
 import type Redis from 'ioredis';
 
@@ -81,6 +82,7 @@ import type Redis from 'ioredis';
     MapsModule,
     TransparencyModule,
     PolicyCenterModule,
+    ReconciliationModule,
   ],
   controllers: [AppController],
   providers: [
