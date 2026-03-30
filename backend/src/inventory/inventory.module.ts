@@ -6,16 +6,22 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { BloodRequestEntity } from '../blood-requests/entities/blood-request.entity';
 import { DonationEntity } from '../donations/entities/donation.entity';
+import { BloodUnit } from '../blood-units/entities/blood-unit.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OrderEntity } from '../orders/entities/order.entity';
 import { UsersModule } from '../users/users.module';
 
 import { InventoryAlertController } from './controllers/inventory-alert.controller';
+import { ExpirationForecastingController } from './controllers/expiration-forecasting.controller';
+import { InventoryAlertController } from './controllers/inventory-alert.controller';
+import { InventoryAnalyticsController } from './controllers/inventory-analytics.controller';
+import { RestockingCampaignController } from './controllers/restocking-campaign.controller';
 import { AlertPreferenceEntity } from './entities/alert-preference.entity';
 import { InventoryAlertEntity } from './entities/inventory-alert.entity';
 import { InventoryEntity } from './entities/inventory.entity';
 import { InventoryStockEntity } from './entities/inventory-stock.entity';
 import { RestockingCampaignEntity } from './entities/restocking-campaign.entity';
+import { InventoryAnalyticsService } from './inventory-analytics.service';
 import { InventoryEventListener } from './inventory-event.listener';
 import { InventoryForecastingService } from './inventory-forecasting.service';
 import { InventoryController } from './inventory.controller';
@@ -36,6 +42,7 @@ import { RestockingCampaignController } from './controllers/restocking-campaign.
       InventoryAlertEntity,
       AlertPreferenceEntity,
       RestockingCampaignEntity,
+      BloodUnit,
     ]),
     BullModule.registerQueue({
       name: 'donor-outreach',
@@ -49,10 +56,13 @@ import { RestockingCampaignController } from './controllers/restocking-campaign.
     InventoryController,
     InventoryAlertController,
     RestockingCampaignController,
+    InventoryAnalyticsController,
+    ExpirationForecastingController,
   ],
   providers: [
     InventoryService,
     InventoryForecastingService,
+    InventoryAnalyticsService,
     InventoryEventListener,
     DonorOutreachProcessor,
     InventoryAlertService,
@@ -63,6 +73,7 @@ import { RestockingCampaignController } from './controllers/restocking-campaign.
     InventoryForecastingService,
     InventoryAlertService,
     RestockingCampaignService,
+    InventoryAnalyticsService,
   ],
 })
 export class InventoryModule {}
